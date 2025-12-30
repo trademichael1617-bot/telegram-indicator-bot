@@ -6,5 +6,4 @@ requests==2.32.3
 Flask==3.1.2
 numpy
 yfinance
-twelvedata
-alpha_vantage
+
