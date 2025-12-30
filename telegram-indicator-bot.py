@@ -62,15 +62,17 @@ def run_bot():
     while True:
         now = datetime.now(timezone.utc)
         if START_HOUR <= now.hour < END_HOUR and now > last_signal_time + timedelta(minutes=COOLDOWN_MIN):
+            # Batch fetch all pairs at once to save time/resources
+            all_data = yf.download(PAIRS, period="1d", interval="1m", progress=False, group_by='ticker')
+            
             rank = get_strength()
             top3, bot3 = [r[0] for r in rank[:3]], [r[0] for r in rank[-3:]]
             
             for p in PAIRS:
-                df = yf.download(p, period="1d", interval="1m", progress=False)
+                df = all_data[p].copy() # Extract specific pair from batch
                 sig = analyze(df, p)
                 if sig:
                     base, quote = p[:3], p[3:6]
-                    # Strength Filter
                     if ("BUY" in sig and (base in top3 or quote in bot3)) or \
                        ("SELL" in sig and (base in bot3 or quote in top3)):
                         msg = f"🎯 *SIGNAL*: {p}\n*Action*: {sig}\n*Price*: {round(df.iloc[-1]['Close'], 5)}\n\n💪 Strong: {top3}\n❄️ Weak: {bot3}"
