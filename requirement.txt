@@ -1,0 +1,10 @@
+setuptools
+python-telegram-bot==21.6
+pandas
+pandas-ta
+requests==2.32.3
+Flask==3.1.2
+numpy
+yfinance
+twelvedata
+alpha_vantage
