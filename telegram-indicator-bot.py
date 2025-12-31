@@ -58,40 +58,58 @@ def analyze(df, pair):
     if sell: return "SELL (PUT) 🔴"
     return None
 # --- STRENGTH METER ---
+# --- STRENGTH METER ---
 def get_strength():
-    data = yf.download(PAIRS, period="1d", interval="15m", progress=False)['Close']
-    strengths = {c: [] for c in ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF"]}
-    for p in PAIRS:
-        rsi = ta.rsi(data[p], length=7).iloc[-1]
-        b, q = p[:3], p[3:6]
-        if b in strengths: strengths[b].append(rsi)
-        if q in strengths: strengths[q].append(100 - rsi)
-    return sorted({k: sum(v)/len(v) for k, v in strengths.items() if v}.items(), key=lambda x: x[1], reverse=True)
+    try:
+        data = yf.download(PAIRS, period="1d", interval="15m", progress=False)['Close']
+        # Handle single ticker return vs multi-ticker dataframe
+        if isinstance(data, pd.Series):
+            return []
+            
+        strengths = {c: [] for c in ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF"]}
+        for p in PAIRS:
+            if p not in data: continue
+            # Use lowercase or safe column access if needed, but 'Close' is standard in YF download
+            rsi_series = ta.rsi(data[p], length=7)
+            if rsi_series is None or len(rsi_series) == 0: continue
+            
+            rsi = rsi_series.iloc[-1]
+            b, q = p[:3], p[3:6]
+            if b in strengths: strengths[b].append(rsi)
+            if q in strengths: strengths[q].append(100 - rsi)
+            
+        return sorted({k: sum(v)/len(v) for k, v in strengths.items() if v}.items(), key=lambda x: x[1], reverse=True)
+    except Exception as e:
+        print(f"Strength Meter Error: {e}")
+        return []
 
 # --- MAIN LOOP ---
 def run_bot():
     last_signal_time = datetime.now(timezone.utc) - timedelta(minutes=COOLDOWN_MIN)
+    print("Bot started. Searching for signals...")
+    
     while True:
         now = datetime.now(timezone.utc)
-        # Check time window and cooldown
         if START_HOUR <= now.hour < END_HOUR and now > last_signal_time + timedelta(minutes=COOLDOWN_MIN):
             try:
-                # Batch fetch all pairs
                 all_data = yf.download(PAIRS, period="1d", interval="1m", progress=False, group_by='ticker')
                 
                 rank = get_strength()
+                if not rank: 
+                    time.sleep(60)
+                    continue
+                    
                 top3, bot3 = [r[0] for r in rank[:3]], [r[0] for r in rank[-3:]]
                 
                 for p in PAIRS:
                     df = all_data[p].copy()
-                    sig = analyze(df, p) # This makes columns lowercase
+                    sig = analyze(df, p) # analyze() converts columns to lowercase
                     
                     if sig:
-                        # Safety: Check if 'close' exists after analyze() conversion
+                        # CRITICAL FIX: Accessing price using lowercase 'close'
                         current_price = round(df["close"].iloc[-1], 5)
                         
                         base, quote = p[:3], p[3:6]
-                        # Strength Filter
                         if ("BUY" in sig and (base in top3 or quote in bot3)) or \
                            ("SELL" in sig and (base in bot3 or quote in top3)):
                             
@@ -102,13 +120,13 @@ def run_bot():
                                    f"❄️ Weak: {', '.join(bot3)}")
                             
                             asyncio.run(bot.send_message(CHAT_ID, msg, parse_mode="Markdown"))
+                            print(f"Signal sent for {p}")
                             last_signal_time = now
-                            break # Cooldown after one successful signal
+                            break 
             except Exception as e:
-                print(f"Error in loop: {e}")
+                print(f"Error in main loop: {e}")
         
         time.sleep(60)
-
 @app.route('/')
 def home(): return "Bot Active"
 
