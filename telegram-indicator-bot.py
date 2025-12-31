@@ -19,42 +19,33 @@ app = Flask(__name__)
 
 # --- ANALYSIS ENGINE ---
 def analyze(df, pair):
-    if df is None or len(df) < 30: 
-        return None
+    if df is None or len(df) < 30: return None
     
-    # FIX: Force columns to lowercase (yfinance returns 'High', 'Low', etc.)
+    # 1. Standardize column names to lowercase
     df.columns = [str(col).lower() for col in df.columns]
     
-    # Ensure necessary columns exist before calculating
-    required = ["high", "low", "close"]
-    if not all(col in df.columns for col in required):
-        print(f"Skipping {pair}: Missing columns {df.columns}")
-        return None
-
-    # 1. ATR Filter (Volatility)
+    # 2. Calculate Indicators
     df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-    if df["atr"] is None or df["atr"].iloc[-1] < MIN_ATR: 
-        return None
+    if df["atr"] is None or df["atr"].iloc[-1] < MIN_ATR: return None
 
-    # 2. Indicators (RSI 7, MACD 5-13-8, Stoch 5-3-3)
     df["rsi"] = ta.rsi(df["close"], length=7)
     
-    # Handle MACD (ensuring we use lowercase names for columns)
-    macd = ta.macd(df["close"], fast=5, slow=13, signal=8)
-    if macd is not None:
-        df["macd_line"] = macd["MACD_5_13_8"]
-        df["macd_signal"] = macd["MACDS_5_13_8"]
+    # MACD Extraction (Safely take by position)
+    macd_df = ta.macd(df["close"], fast=5, slow=13, signal=8)
+    if macd_df is not None:
+        df["macd_line"] = macd_df.iloc[:, 0]   # First column (MACD)
+        df["macd_signal"] = macd_df.iloc[:, 2] # Third column (Signal)
     
-    # Handle Stochastic
-    stoch = ta.stoch(df["high"], df["low"], df["close"], k=5, d=3, smooth_k=3)
-    if stoch is not None:
-        df["st_k"] = stoch["STOCHk_5_3_3"]
-        df["st_d"] = stoch["STOCHd_5_3_3"]
-    
+    # Stochastic Extraction (Safely take by position)
+    stoch_df = ta.stoch(df["high"], df["low"], df["close"], k=5, d=3, smooth_k=3)
+    if stoch_df is not None:
+        df["st_k"] = stoch_df.iloc[:, 0] # First column (K)
+        df["st_d"] = stoch_df.iloc[:, 1] # Second column (D)
+
+    # 3. Final Signal Logic
     if len(df) < 2: return None
     latest, prev = df.iloc[-1], df.iloc[-2]
     
-    # 3. Triple Alignment Logic
     buy = (latest["rsi"] > 50 and 
            latest["macd_line"] > latest["macd_signal"] and 
            latest["st_k"] > latest["st_d"] and prev["st_k"] <= prev["st_d"])
