@@ -19,32 +19,53 @@ app = Flask(__name__)
 
 # --- ANALYSIS ENGINE ---
 def analyze(df, pair):
-    if df is None or len(df) < 30: return None
+    if df is None or len(df) < 30: 
+        return None
     
+    # FIX: Force columns to lowercase (yfinance returns 'High', 'Low', etc.)
+    df.columns = [str(col).lower() for col in df.columns]
+    
+    # Ensure necessary columns exist before calculating
+    required = ["high", "low", "close"]
+    if not all(col in df.columns for col in required):
+        print(f"Skipping {pair}: Missing columns {df.columns}")
+        return None
+
     # 1. ATR Filter (Volatility)
     df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-    if df["atr"].iloc[-1] < MIN_ATR: return None
+    if df["atr"] is None or df["atr"].iloc[-1] < MIN_ATR: 
+        return None
 
     # 2. Indicators (RSI 7, MACD 5-13-8, Stoch 5-3-3)
     df["rsi"] = ta.rsi(df["close"], length=7)
-    macd = ta.macd(df["close"], fast=5, slow=13, signal=8)
-    stoch = ta.stoch(df["high"], df["low"], df["close"], k=5, d=3, smooth_k=3)
     
+    # Handle MACD (ensuring we use lowercase names for columns)
+    macd = ta.macd(df["close"], fast=5, slow=13, signal=8)
+    if macd is not None:
+        df["macd_line"] = macd["MACD_5_13_8"]
+        df["macd_signal"] = macd["MACDS_5_13_8"]
+    
+    # Handle Stochastic
+    stoch = ta.stoch(df["high"], df["low"], df["close"], k=5, d=3, smooth_k=3)
+    if stoch is not None:
+        df["st_k"] = stoch["STOCHk_5_3_3"]
+        df["st_d"] = stoch["STOCHd_5_3_3"]
+    
+    if len(df) < 2: return None
     latest, prev = df.iloc[-1], df.iloc[-2]
     
-    # Logic: All 3 must align
-    buy = (latest["rsi"] > 50 and latest["macd_5_13_8"] > latest["macds_5_13_8"] and 
-           stoch["stochk_5_3_3"].iloc[-1] > stoch["stochd_5_3_3"].iloc[-1] and 
-           stoch["stochk_5_3_3"].iloc[-2] <= stoch["stochd_5_3_3"].iloc[-2])
+    # 3. Triple Alignment Logic
+    buy = (latest["rsi"] > 50 and 
+           latest["macd_line"] > latest["macd_signal"] and 
+           latest["st_k"] > latest["st_d"] and prev["st_k"] <= prev["st_d"])
            
-    sell = (latest["rsi"] < 50 and latest["macd_5_13_8"] < latest["macds_5_13_8"] and 
-            stoch["stochk_5_3_3"].iloc[-1] < stoch["stochd_5_3_3"].iloc[-1] and 
-            stoch["stochk_5_3_3"].iloc[-2] >= stoch["stochd_5_3_3"].iloc[-2])
+    sell = (latest["rsi"] < 50 and 
+            latest["macd_line"] < latest["macd_signal"] and 
+            latest["st_k"] < latest["st_d"] and prev["st_k"] >= prev["st_d"])
 
     if buy: return "BUY (CALL) 🟢"
     if sell: return "SELL (PUT) 🔴"
     return None
-
 # --- STRENGTH METER ---
 def get_strength():
     data = yf.download(PAIRS, period="1d", interval="15m", progress=False)['Close']
