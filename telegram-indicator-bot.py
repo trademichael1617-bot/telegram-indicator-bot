@@ -73,24 +73,40 @@ def run_bot():
     last_signal_time = datetime.now(timezone.utc) - timedelta(minutes=COOLDOWN_MIN)
     while True:
         now = datetime.now(timezone.utc)
+        # Check time window and cooldown
         if START_HOUR <= now.hour < END_HOUR and now > last_signal_time + timedelta(minutes=COOLDOWN_MIN):
-            # Batch fetch all pairs at once to save time/resources
-            all_data = yf.download(PAIRS, period="1d", interval="1m", progress=False, group_by='ticker')
-            
-            rank = get_strength()
-            top3, bot3 = [r[0] for r in rank[:3]], [r[0] for r in rank[-3:]]
-            
-            for p in PAIRS:
-                df = all_data[p].copy() # Extract specific pair from batch
-                sig = analyze(df, p)
-                if sig:
-                    base, quote = p[:3], p[3:6]
-                    if ("BUY" in sig and (base in top3 or quote in bot3)) or \
-                       ("SELL" in sig and (base in bot3 or quote in top3)):
-                        msg = f"🎯 *SIGNAL*: {p}\n*Action*: {sig}\n*Price*: {round(df.iloc[-1]['Close'], 5)}\n\n💪 Strong: {top3}\n❄️ Weak: {bot3}"
-                        asyncio.run(bot.send_message(CHAT_ID, msg, parse_mode="Markdown"))
-                        last_signal_time = now
-                        break
+            try:
+                # Batch fetch all pairs
+                all_data = yf.download(PAIRS, period="1d", interval="1m", progress=False, group_by='ticker')
+                
+                rank = get_strength()
+                top3, bot3 = [r[0] for r in rank[:3]], [r[0] for r in rank[-3:]]
+                
+                for p in PAIRS:
+                    df = all_data[p].copy()
+                    sig = analyze(df, p) # This makes columns lowercase
+                    
+                    if sig:
+                        # Safety: Check if 'close' exists after analyze() conversion
+                        current_price = round(df["close"].iloc[-1], 5)
+                        
+                        base, quote = p[:3], p[3:6]
+                        # Strength Filter
+                        if ("BUY" in sig and (base in top3 or quote in bot3)) or \
+                           ("SELL" in sig and (base in bot3 or quote in top3)):
+                            
+                            msg = (f"🎯 *SIGNAL*: {p}\n"
+                                   f"*Action*: {sig}\n"
+                                   f"*Price*: {current_price}\n\n"
+                                   f"💪 Strong: {', '.join(top3)}\n"
+                                   f"❄️ Weak: {', '.join(bot3)}")
+                            
+                            asyncio.run(bot.send_message(CHAT_ID, msg, parse_mode="Markdown"))
+                            last_signal_time = now
+                            break # Cooldown after one successful signal
+            except Exception as e:
+                print(f"Error in loop: {e}")
+        
         time.sleep(60)
 
 @app.route('/')
